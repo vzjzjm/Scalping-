@@ -12,6 +12,12 @@ from datetime import datetime
 
 
 
+# --- CONFIG ---
+
+st.set_page_config(page_title="Jim Simons Quant V7", layout="wide")
+
+
+
 # Import core libraries (install if missing is maintained in requirements.txt or manually)
 
 try:
@@ -24,7 +30,29 @@ try:
 
 except ImportError:
 
-    st.error("⚠️ Missing Libraries. If running locally, please run: `pip install -r requirements.txt`")
+    st.error("⚠️ **Missing Libraries**")
+
+    st.markdown("""
+
+    To fix this, you need to install the required packages.
+
+    
+
+    **If running locally:**
+
+    1. Open your terminal.
+
+    2. Run this command:
+
+    ```bash
+
+    pip install -r requirements.txt
+
+    ```
+
+    3. Refresh this page.
+
+    """)
 
     st.stop()
 
@@ -34,8 +62,6 @@ warnings.filterwarnings('ignore')
 
 
 
-# --- CONFIG ---
-
 SYMBOL_TV = "XAUUSD"
 
 EXCHANGE_TV = "OANDA"
@@ -44,7 +70,7 @@ SYMBOL_YF = "GC=F"
 
 
 
-# Sidebar Configuration (Moved up for Config)
+# --- SIDEBAR & CONFIG ---
 
 st.sidebar.header("⚙️ Configuration")
 
@@ -54,9 +80,11 @@ st.sidebar.header("⚙️ Configuration")
 
 st.sidebar.subheader("🔐 TradingView Login (Optional)")
 
-tv_user = st.sidebar.text_input("Username", value="", help="Leave empty for Guest Mode")
+st.sidebar.info("Leave empty to use Guest Mode (delayed data). Login for real-time.")
 
-tv_pass = st.sidebar.text_input("Password", value="", type="password")
+tv_user = st.sidebar.text_input("Username", value="", help="Your TradingView Username")
+
+tv_pass = st.sidebar.text_input("Password", value="", type="password", help="Your TradingView Password")
 
 
 
@@ -64,41 +92,57 @@ mode = st.sidebar.radio("Select Mode", ["Live Auto-Loop", "History Search"])
 
 
 
-# --- CORE CLASSES (Reused from V7.3) ---
+# --- CORE CLASSES ---
 
 class DataLoader:
 
     def __init__(self):
 
-        # Cache the TvDatafeed instance in session state to avoid re-login or to update if creds change
-
-        # Simple logic: If creds are provided, use them.
+        # Cache the TvDatafeed instance to avoid re-login
 
         if 'tv' not in st.session_state:
 
-            try:
+            self._login()
 
-                if tv_user and tv_pass:
+        
 
-                    st.session_state.tv = TvDatafeed(username=tv_user, password=tv_pass)
+        # Check if credentials changed
 
-                    st.toast("Logged in to TradingView!", icon="✅")
+        if tv_user and tv_pass and (getattr(st.session_state, 'tv_user', '') != tv_user):
 
-                else:
+             self._login()
 
-                    st.session_state.tv = TvDatafeed()
-
-            except Exception as e:
-
-                st.error(f"Login Failed: {e}")
-
-                st.session_state.tv = TvDatafeed() # Fallback
-
-                
+             
 
         self.tv = st.session_state.tv
 
         
+
+    def _login(self):
+
+        try:
+
+            if tv_user and tv_pass:
+
+                st.session_state.tv = TvDatafeed(username=tv_user, password=tv_pass)
+
+                st.session_state.tv_user = tv_user
+
+                st.toast(f"Logged in as {tv_user}!", icon="✅")
+
+            else:
+
+                st.session_state.tv = TvDatafeed()
+
+                st.session_state.tv_user = ""
+
+        except Exception as e:
+
+            st.error(f"Login Failed: {e}")
+
+            st.session_state.tv = TvDatafeed() # Fallback to guest
+
+
 
     def fetch_live(self, n_bars=1000):
 
@@ -118,11 +162,9 @@ class DataLoader:
 
 
 
-    def fetch_history(self, target_date=None, days=730):
+    def fetch_history(self, target_date=None):
 
-        # Hybrid Fetcher
-
-        # 1. Try 15m (Last 60 days via YF)
+        # Hybrid Fetcher (YF Fallback)
 
         try:
 
@@ -133,8 +175,6 @@ class DataLoader:
         except: pass
 
 
-
-        # 2. Try 1h (Last 730 days)
 
         try:
 
@@ -160,7 +200,9 @@ class DataLoader:
 
         if target_date:
 
-            return target_date in df.index.strftime('%Y-%m-%d').unique()
+            dates = df.index.strftime('%Y-%m-%d').unique()
+
+            return target_date in dates
 
         return True
 
@@ -220,8 +262,6 @@ class Strategy:
 
         data = df.dropna()
 
-        # Exclude non-feature columns
-
         self.fe_cols = [c for c in data.columns if c not in ['target', 'open', 'high', 'low', 'close', 'volume', 'symbol', 'adj close', 'is_copy']]
 
         self.model.fit(data[self.fe_cols], data['target'])
@@ -246,9 +286,9 @@ class RiskManager:
 
             atr = tr.rolling(14).mean().iloc[-1]
 
-            
+        
 
-        if np.isnan(atr): atr = 1.0 # default
+        if np.isnan(atr): atr = 1.0
 
         
 
@@ -276,13 +316,7 @@ class RiskManager:
 
 
 
-# --- STREAMLIT UI ---
-
-
-
-st.set_page_config(page_title="Jim Simons Quant V7", layout="wide")
-
-
+# --- APP LAYOUT ---
 
 st.title("⚡ Quant System Dashboard")
 
@@ -290,7 +324,7 @@ st.markdown("### XAUUSD (Gold) | Random Forest | Volatility Scalping")
 
 
 
-# Initialize Classes
+# Initialize
 
 dl = DataLoader()
 
@@ -306,23 +340,15 @@ if mode == "Live Auto-Loop":
 
     st.subheader("📡 Live Auto-Loop")
 
-    
-
     col1, col2 = st.columns(2)
 
-    with col1: 
+    with col1: start_btn = st.button("▶ START System", type="primary")
 
-        start_btn = st.button("▶ START System", type="primary")
-
-    with col2:
-
-        stop_btn = st.button("⏹ STOP System")
+    with col2: stop_btn = st.button("⏹ STOP System")
 
 
 
     if 'running' not in st.session_state: st.session_state.running = False
-
-    
 
     if start_btn: st.session_state.running = True
 
@@ -330,25 +356,23 @@ if mode == "Live Auto-Loop":
 
     
 
-    status_placeholder = st.empty()
+    status = st.empty()
 
-    log_placeholder = st.empty()
+    last_update = st.empty()
 
     
 
     if st.session_state.running:
 
-        status_placeholder.success("Status: 🟢 RUNNING (Updates every 60s)")
+        status.success("Status: 🟢 RUNNING")
 
         
 
-        # Initial Training
-
-        with st.spinner("Fetching Data & Training Model..."):
+        with st.spinner("Initializing Model..."):
 
             raw = dl.fetch_live(3000)
 
-            if raw is None: raw, _ = dl.fetch_history() # Fallback
+            if raw is None: raw, _ = dl.fetch_history()
 
             
 
@@ -360,7 +384,7 @@ if mode == "Live Auto-Loop":
 
             else:
 
-                st.error("No Data Sources Available.")
+                st.error("No Data. check credentials.")
 
                 st.session_state.running = False
 
@@ -368,19 +392,9 @@ if mode == "Live Auto-Loop":
 
         
 
-        # Live Loop
-
-        logs = []
-
-        log_container = st.container()
-
-        
-
         while st.session_state.running:
 
             try:
-
-                # Fetch fresh data
 
                 raw_live = dl.fetch_live(100)
 
@@ -394,55 +408,21 @@ if mode == "Live Auto-Loop":
 
                     price = row['close']
 
-                    t = row.name.strftime('%H:%M:%S')
-
                     
 
-                    # Logic
-
-                    action = "WAIT"
-
-                    sl, tp = 0.0, 0.0
-
-                    
+                    action="WAIT"; sl=0.0; tp=0.0
 
                     if prob > 0.55: 
 
-                        action = "BUY"
+                        action="BUY"; sl, tp = rm.get_sl_tp(df, "BUY", price)
 
-                        sl, tp = rm.get_sl_tp(df, "BUY", price)
+                    elif prob < 0.45: 
 
-                    elif prob < 0.45:
-
-                        action = "SELL"
-
-                        sl, tp = rm.get_sl_tp(df, "SELL", price)
+                        action="SELL"; sl, tp = rm.get_sl_tp(df, "SELL", price)
 
                         
 
-                    # Log
-
-                    log_entry = {
-
-                        "Time": t,
-
-                        "Price": price,
-
-                        "Prob": f"{prob:.2f}",
-
-                        "Signal": action,
-
-                        "SL": sl if action != "WAIT" else "-",
-
-                        "TP": tp if action != "WAIT" else "-"
-
-                    }
-
-                    
-
-                    # Display Simple Metric for latest
-
-                    with log_placeholder.container():
+                    with last_update.container():
 
                         m1, m2, m3 = st.columns(3)
 
@@ -450,37 +430,17 @@ if mode == "Live Auto-Loop":
 
                         m2.metric("Probability", f"{prob:.2f}")
 
-                        m3.metric("Signal", action, delta_color="normal" if action=="WAIT" else ("inverse" if action=="SELL" else "normal"))
+                        m3.metric("Signal", action, delta_color="normal" if action=="WAIT" else "inverse")
 
                         
 
                         if action != "WAIT":
 
-                            st.info(f"🚀 **SIGNAL TRIGGERED**: {action} @ {price} | SL: {sl} | TP: {tp}")
-
-
-
-                    # Append to historical log (optional, or just print last few)
-
-                    # For simplicity in loop, just keeping the latest state visible is key.
-
-                    
-
-                time.sleep(60) # Wait 60s
-
-                # st.rerun() # Rerun is destructive to the loop, better to just loop here.
-
-                # However, Streamlit will complain if we loop forever without interaction check.
-
-                # The 'stop' button won't work inside this blocking loop unless we assume user refreshes page.
-
-                # Check for stop:
-
-                # In standard Streamlit, we can't interrupt a loop easily with a button unless we use st.experimental_rerun() on a keypress, but buttons don't update while code runs.
-
-                # We will just run for now. User can stop by refreshing or clicking stop (which queues a rerun).
+                            st.info(f"Signal: {action} | SL: {sl} | TP: {tp}")
 
                 
+
+                time.sleep(60)
 
             except Exception as e:
 
@@ -490,7 +450,7 @@ if mode == "Live Auto-Loop":
 
     else:
 
-        status_placeholder.warning("Status: 🔴 IDLE")
+        status.warning("Status: 🔴 IDLE")
 
 
 
@@ -498,37 +458,15 @@ elif mode == "History Search":
 
     st.subheader("📅 History Search")
 
+    d_date = st.date_input("Select Date")
+
+    sens = st.selectbox("Sensitivity", ["Low Risk (0.55)", "Medium (0.52)", "High Activity (0.51)"], index=1)
+
     
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        d_date = st.date_input("Select Date")
-
-    with col2:
-
-        sensitivity = st.selectbox("Sensitivity", [
-
-            "Low Risk (0.55)", "Medium (0.52)", "High Activity (0.51)"
-
-        ], index=1)
-
-        
-
-    thr_map = {"Low Risk (0.55)": 0.55, "Medium (0.52)": 0.52, "High Activity (0.51)": 0.51}
-
-    thresh = thr_map[sensitivity]
-
-        
-
-    if st.button("🔍 Search History"):
+    if st.button("🔍 Search"):
 
         d_str = d_date.strftime("%Y-%m-%d")
-
-        st.write(f"Searching for **{d_str}** with Threshold **{thresh}**...")
-
-        
 
         raw, tf = dl.fetch_history(d_str)
 
@@ -536,13 +474,11 @@ elif mode == "History Search":
 
         if raw is None:
 
-            st.error("No data found. Try a date within the last 60 days (15m) or 2 years (1H).")
+            st.error("No data found.")
 
         else:
 
-            st.success(f"Data Found! Timeframe: {tf}")
-
-            
+            st.success(f"Data: {tf}")
 
             df = fe.add_features(raw)
 
@@ -550,108 +486,48 @@ elif mode == "History Search":
 
             df['prob'] = strat.model.predict_proba(df[strat.fe_cols])[:, 1]
 
-            
-
-            # Filter
-
-            mask = df.index.astype(str).str.startswith(d_str)
-
-            res = df[mask]
+            res = df[df.index.astype(str).str.startswith(d_str)]
 
             
 
             if res.empty:
 
-                st.warning("Market closed or empty data for this day.")
+                st.warning("Market closed.")
 
             else:
 
-                # Calculate PnL
-
-                res = res.copy()
+                thresh = float(sens.split('(')[1][:-1])
 
                 trades = []
 
-                net_pnl = 0
+                pnl = 0
 
                 wins = 0
-
-                count = 0
 
                 
 
                 for i in range(len(res)-1):
 
-                    r = res.iloc[i]
+                    r = res.iloc[i]; nr = res.iloc[i+1]
 
-                    nr = res.iloc[i+1]
+                    p=0; s="-"
 
-                    p_pnl = 0
+                    if r['prob'] > thresh: s="BUY"; p=nr['close']-r['close']
 
-                    sig = "-"
+                    elif r['prob'] < (1-thresh): s="SELL"; p=r['close']-nr['close']
 
                     
 
-                    if r['prob'] > thresh:
+                    if s!="-":
 
-                        sig = "BUY"
+                        pnl+=p; wins+=(1 if p>0 else 0)
 
-                        p_pnl = nr['close'] - r['close']
-
-                    elif r['prob'] < (1 - thresh):
-
-                        sig = "SELL"
-
-                        p_pnl = r['close'] - nr['close']
+                        trades.append({"Time": r.name.strftime('%H:%M'), "Price": r['close'], "Sig": s, "Prob": r['prob'], "PnL": p})
 
                         
 
-                    if sig != "-":
+                st.metric("Net PnL", f"${pnl:.2f}")
 
-                        count += 1
+                if trades: st.dataframe(trades)
 
-                        net_pnl += p_pnl
-
-                        if p_pnl > 0: wins += 1
-
-                        trades.append({
-
-                            "Time": r.name.strftime('%H:%M'),
-
-                            "Price": f"{r['close']:.2f}",
-
-                            "Signal": sig,
-
-                            "Prob": f"{r['prob']:.2f}",
-
-                            "PnL ($)": f"{p_pnl:+.2f}"
-
-                        })
-
-                
-
-                # Metrics
-
-                m1, m2, m3 = st.columns(3)
-
-                m1.metric("Total Trades", count)
-
-                win_rate = (wins/count * 100) if count > 0 else 0
-
-                m2.metric("Win Rate", f"{win_rate:.0f}%")
-
-                m3.metric("Net PnL", f"${net_pnl:.2f}", delta_color="normal")
-
-                
-
-                # Table
-
-                if trades:
-
-                    st.table(pd.DataFrame(trades))
-
-                else:
-
-                    st.info("No trades triggered. Market was choppy.")
-
-                    st.write("Raw Probabilities (First 5):", res['prob'].head().values)
+                else: st.info("No trades (Choppy).")
