@@ -24,7 +24,7 @@ try:
 
 except ImportError:
 
-    st.error("Missing Libraries. Please run: pip install tvdatafeed yfinance scikit-learn pandas numpy")
+    st.error("⚠️ Missing Libraries. If running locally, please run: `pip install -r requirements.txt`")
 
     st.stop()
 
@@ -44,17 +44,57 @@ SYMBOL_YF = "GC=F"
 
 
 
+# Sidebar Configuration (Moved up for Config)
+
+st.sidebar.header("⚙️ Configuration")
+
+
+
+# Credentials Input
+
+st.sidebar.subheader("🔐 TradingView Login (Optional)")
+
+tv_user = st.sidebar.text_input("Username", value="", help="Leave empty for Guest Mode")
+
+tv_pass = st.sidebar.text_input("Password", value="", type="password")
+
+
+
+mode = st.sidebar.radio("Select Mode", ["Live Auto-Loop", "History Search"])
+
+
+
 # --- CORE CLASSES (Reused from V7.3) ---
 
 class DataLoader:
 
     def __init__(self):
 
-        # Cache the TvDatafeed instance in session state to avoid re-login
+        # Cache the TvDatafeed instance in session state to avoid re-login or to update if creds change
+
+        # Simple logic: If creds are provided, use them.
 
         if 'tv' not in st.session_state:
 
-            st.session_state.tv = TvDatafeed()
+            try:
+
+                if tv_user and tv_pass:
+
+                    st.session_state.tv = TvDatafeed(username=tv_user, password=tv_pass)
+
+                    st.toast("Logged in to TradingView!", icon="✅")
+
+                else:
+
+                    st.session_state.tv = TvDatafeed()
+
+            except Exception as e:
+
+                st.error(f"Login Failed: {e}")
+
+                st.session_state.tv = TvDatafeed() # Fallback
+
+                
 
         self.tv = st.session_state.tv
 
@@ -247,14 +287,6 @@ st.set_page_config(page_title="Jim Simons Quant V7", layout="wide")
 st.title("⚡ Quant System Dashboard")
 
 st.markdown("### XAUUSD (Gold) | Random Forest | Volatility Scalping")
-
-
-
-# Sidebar Configuration
-
-st.sidebar.header("⚙️ Configuration")
-
-mode = st.sidebar.radio("Select Mode", ["Live Auto-Loop", "History Search"])
 
 
 
@@ -623,4 +655,3 @@ elif mode == "History Search":
                     st.info("No trades triggered. Market was choppy.")
 
                     st.write("Raw Probabilities (First 5):", res['prob'].head().values)
-
